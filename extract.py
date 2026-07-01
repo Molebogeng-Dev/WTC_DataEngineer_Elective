@@ -17,7 +17,7 @@ import os
 import sqlite3
 
 
-def get_connection(db_path)
+def get_connection(db_path):
     os.makedirs(os.path.dirname(db_path), exist_ok=True)
     conn = sqlite3.connect(db_path)
     schema_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "sql", "schema.sql")
@@ -26,7 +26,7 @@ def get_connection(db_path)
     return conn
 
 
-def extract(input_csv, db_path)
+def extract(input_csv, db_path):
     conn = get_connection(db_path)
     cur = conn.cursor()
 
