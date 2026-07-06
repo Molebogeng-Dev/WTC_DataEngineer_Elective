@@ -1,0 +1,407 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Spend Sense — Know where your money goes</title>
+    <link href="style.css" rel="stylesheet">
+</head>
+<body>
+<div class="wrap">
+
+    <header class="top">
+        <div class="wordmark">Spend<span>Sense</span></div>
+        <div class="tagline">Upload. Understand. Save.</div>
+    </header>
+
+    <!-- ===================== UPLOAD SCREEN ===================== -->
+    <div id="uploadScreen">
+        <h1>See exactly where your money went — and where it can go further.</h1>
+        <p class="sub">Upload three to six months of your bank statement as a CSV. Everything is processed
+            right here in your browser; nothing is uploaded to a server.</p>
+
+        <div class="dropzone" id="dropzone">
+            <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="#2f5d50" stroke-width="1.6">
+                <path d="M12 16V4M12 4l-4 4M12 4l4 4" stroke-linecap="round" stroke-linejoin="round"/>
+                <path d="M4 16v3a2 2 0 002 2h12a2 2 0 002-2v-3" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+            <div class="ctaText">Click to upload, or drag a CSV here</div>
+            <div class="subText">date, description, amount, balance columns</div>
+        </div>
+        <input type="file" id="fileInput" accept=".csv" />
+
+        <div>
+            <button class="sample-link" id="sampleBtn">Don't have a statement handy? Try a sample dataset →</button>
+        </div>
+
+        <p class="format-note">Expected columns: <strong>date</strong> (YYYY-MM-DD), <strong>description</strong>,
+            <strong>amount</strong> (negative for spending, positive for income), <strong>balance</strong> (optional).
+            This matches the export format from the ETL pipeline's mock data generator.</p>
+
+        <div class="error-box" id="errorBox"></div>
+    </div>
+
+    <!-- ===================== RESULTS SCREEN ===================== -->
+    <div id="resultsScreen">
+        <div class="hero-stat">
+            <div class="label">Potential monthly saving</div>
+            <div class="amount" id="heroAmount">R0</div>
+            <div class="desc" id="heroDesc">—</div>
+        </div>
+
+        <div class="grid-two">
+            <div class="panel">
+                <h2>Average spend by category</h2>
+                <div id="categoryBars"></div>
+            </div>
+            <div class="panel">
+                <h2>Where you can cut back</h2>
+                <div id="insightsList"></div>
+            </div>
+        </div>
+
+        <div class="panel">
+            <h2>Monthly breakdown</h2>
+            <table class="month-table" id="monthTable">
+                <thead><tr><th>Month</th><th class="num">Income</th><th class="num">Spending</th><th class="num">Net</th></tr></thead>
+                <tbody id="monthTableBody"></tbody>
+            </table>
+        </div>
+
+        <div style="margin-top:24px; text-align:center;">
+            <button class="reset-btn" id="resetBtn">Upload a different statement</button>
+        </div>
+    </div>
+
+</div>
+
+<script>
+    /* =========================================================
+       SpendSense — client-side CSV parsing, categorization and
+       savings-insight generation. Mirrors the logic in the
+       Python ETL's transform.py / load.py so results are
+       consistent whether run via Airflow or live in-browser.
+       ========================================================= */
+
+    const CATEGORY_RULES = [
+      ["Groceries", ["checkers", "pick n pay", "woolworths food", "shoprite", "spar"]],
+      ["Eating Out", ["mugg", "kfc", "steers", "nando", "uber eats", "wimpy", "debonairs"]],
+      ["Transport", ["uber trip", "shell", "engen", "gautrain", "bolt", "taxi", "fuel"]],
+      ["Airtime & Data", ["vodacom", "mtn", "telkom", "cell c", "airtime", "data bundle"]],
+      ["Subscriptions", ["netflix", "dstv", "spotify", "showmax", "amazon prime", "apple.com"]],
+      ["Rent/Housing", ["rent payment", "rent ", "landlord", "bond payment"]],
+      ["Utilities", ["city power", "joburg water", "eskom", "municipal", "electricity"]],
+      ["Insurance", ["discovery", "outsurance", "momentum", "old mutual", "insurance", "medical aid"]],
+      ["Entertainment", ["ster-kinekor", "sun international", "spur family", "cinema", "casino"]],
+      ["Shopping", ["mr price", "edgars", "takealot", "game stores", "h&m"]],
+      ["Bank Fees", ["account fee", "atm withdrawal fee", "card replacement", "service fee"]],
+      ["Savings Transfer", ["eft to savings", "savings account", "investment transfer"]],
+      ["Income", ["salary", "employer", "deposit received"]],
+    ];
+
+    const DISCRETIONARY = new Set(["Eating Out", "Entertainment", "Shopping", "Subscriptions", "Airtime & Data"]);
+    const HIGH_SPEND_THRESHOLD_PCT = 15;
+
+    function categorize(desc) {
+      const d = desc.toLowerCase();
+      for (const [cat, keywords] of CATEGORY_RULES) {
+        if (keywords.some(k => d.includes(k))) return cat;
+      }
+      return "Other / Uncategorized";
+    }
+
+    function parseCSV(text) {
+      const lines = text.trim().split(/\r?\n/);
+      const headers = lines[0].split(",").map(h => h.trim().toLowerCase());
+      const rows = [];
+      for (let i = 1; i < lines.length; i++) {
+        if (!lines[i].trim()) continue;
+        const parts = lines[i].split(",");
+        const row = {};
+        headers.forEach((h, idx) => row[h] = (parts[idx] || "").trim());
+        rows.push(row);
+      }
+      return rows;
+    }
+
+    function formatR(n) {
+      return "R" + Number(n).toLocaleString("en-ZA", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    }
+
+    function processTransactions(rows) {
+      const byMonth = {};       // month -> { category -> total }
+      const overallByCategory = {};
+      const incomeByMonth = {};
+      const spendByMonth = {};
+
+      rows.forEach(r => {
+        const amount = parseFloat(r.amount);
+        if (isNaN(amount)) return;
+        const month = (r.date || "").slice(0, 7);
+        const category = categorize(r.description || "");
+
+        if (amount > 0) {
+          incomeByMonth[month] = (incomeByMonth[month] || 0) + amount;
+        } else {
+          const spent = Math.abs(amount);
+          byMonth[month] = byMonth[month] || {};
+          byMonth[month][category] = (byMonth[month][category] || 0) + spent;
+          overallByCategory[category] = (overallByCategory[category] || 0) + spent;
+          spendByMonth[month] = (spendByMonth[month] || 0) + spent;
+        }
+      });
+
+      const months = Object.keys(byMonth).sort();
+      const numMonths = months.length || 1;
+      const avgByCategory = {};
+      Object.entries(overallByCategory).forEach(([cat, total]) => {
+        avgByCategory[cat] = total / numMonths;
+      });
+      const totalAvgSpend = Object.values(avgByCategory).reduce((a, b) => a + b, 0);
+      const avgIncome = Object.values(incomeByMonth).length
+        ? Object.values(incomeByMonth).reduce((a, b) => a + b, 0) / Object.values(incomeByMonth).length
+        : 0;
+
+      return { byMonth, overallByCategory, avgByCategory, totalAvgSpend, avgIncome, incomeByMonth, spendByMonth, months, numMonths };
+    }
+
+    function generateInsights(data) {
+      const { avgByCategory, totalAvgSpend, avgIncome, numMonths } = data;
+      const insights = [];
+      const sortedCats = Object.entries(avgByCategory).sort((a, b) => b[1] - a[1]);
+
+      // Top categories
+      sortedCats.slice(0, 3).forEach(([cat, avg]) => {
+        const pct = totalAvgSpend ? (avg / totalAvgSpend) * 100 : 0;
+        insights.push({
+          type: "summary",
+          text: `You spend an average of ${formatR(avg)} per month on ${cat}, which is ${pct.toFixed(1)}% of your total monthly spending.`,
+          saving: 0,
+        });
+      });
+
+      // High discretionary spend
+      sortedCats.forEach(([cat, avg]) => {
+        const pct = totalAvgSpend ? (avg / totalAvgSpend) * 100 : 0;
+        if (DISCRETIONARY.has(cat) && pct >= HIGH_SPEND_THRESHOLD_PCT) {
+          const cut = avg * 0.30;
+          insights.push({
+            type: "saving_tip",
+            text: `Your ${cat} spend (${formatR(avg)}/month) is high relative to your overall budget. Cutting this by 30% could save you roughly ${formatR(cut)} per month, or ${formatR(cut * 12)} per year.`,
+            saving: cut,
+          });
+        }
+      });
+
+      // Subscriptions
+      if (avgByCategory["Subscriptions"]) {
+        const sub = avgByCategory["Subscriptions"];
+        insights.push({
+          type: "saving_tip",
+          text: `You're spending about ${formatR(sub)}/month on subscriptions. Review which ones you actually use — cancelling even one unused subscription is the easiest saving available to you.`,
+          saving: sub * 0.25,
+        });
+      }
+
+      // Savings rate
+      if (avgIncome > 0) {
+        const savingsAvg = avgByCategory["Savings Transfer"] || 0;
+        const rate = (savingsAvg / avgIncome) * 100;
+        if (rate < 10) {
+          const target = avgIncome * 0.10;
+          const gap = target - savingsAvg;
+          insights.push({
+            type: "warning",
+            text: `You're currently saving about ${rate.toFixed(1)}% of your income. A common guideline is to save at least 10%. Increasing your monthly transfer to savings by ${formatR(gap)} would get you there.`,
+            saving: gap,
+          });
+        } else {
+          insights.push({
+            type: "summary",
+            text: `You're saving about ${rate.toFixed(1)}% of your income — solid habit, keep it up.`,
+            saving: 0,
+          });
+        }
+      }
+
+      // Eating out vs groceries
+      const eatingOut = avgByCategory["Eating Out"] || 0;
+      const groceries = avgByCategory["Groceries"] || 0;
+      if (eatingOut > 0 && groceries > 0 && eatingOut > groceries * 0.5) {
+        const save = eatingOut * 0.4;
+        insights.push({
+          type: "saving_tip",
+          text: `You spend ${formatR(eatingOut)}/month eating out compared to ${formatR(groceries)} on groceries. Shifting a few takeaway meals a week to home-cooked meals could realistically save you ${formatR(save)}/month.`,
+          saving: save,
+        });
+      }
+
+      const totalSaving = insights.reduce((sum, i) => sum + (i.saving || 0), 0);
+      return { insights, totalSaving };
+    }
+
+    function render(data, insightsResult) {
+      document.getElementById("uploadScreen").style.display = "none";
+      document.getElementById("resultsScreen").style.display = "block";
+
+      // Hero
+      document.getElementById("heroAmount").textContent = formatR(insightsResult.totalSaving) + " / month";
+      document.getElementById("heroDesc").textContent =
+        `Based on ${data.numMonths} month(s) of transactions, here's where your money is going and what's realistic to cut back on.`;
+
+      // Category bars
+      const sortedCats = Object.entries(data.avgByCategory).sort((a, b) => b[1] - a[1]).filter(([c]) => c !== "Income");
+      const maxVal = sortedCats.length ? sortedCats[0][1] : 1;
+      const barsEl = document.getElementById("categoryBars");
+      barsEl.innerHTML = "";
+      sortedCats.forEach(([cat, avg]) => {
+        const pct = Math.max(4, (avg / maxVal) * 100);
+        const row = document.createElement("div");
+        row.className = "bar-row";
+        row.innerHTML = `
+          <div class="cat-name">${cat}</div>
+          <div class="bar-track"><div class="bar-fill" style="width:${pct}%"></div></div>
+          <div class="bar-amount">${formatR(avg)}</div>
+        `;
+        barsEl.appendChild(row);
+      });
+
+      // Insights
+      const listEl = document.getElementById("insightsList");
+      listEl.innerHTML = "";
+      insightsResult.insights.forEach(ins => {
+        const card = document.createElement("div");
+        card.className = "insight-card" + (ins.type === "warning" ? " warn" : "");
+        const tagLabel = ins.type === "saving_tip" ? "Saving tip" : ins.type === "warning" ? "Heads up" : "Summary";
+        card.innerHTML = `<div class="tag">${tagLabel}</div>${ins.text}`;
+        listEl.appendChild(card);
+      });
+
+      // Monthly table
+      const tbody = document.getElementById("monthTableBody");
+      tbody.innerHTML = "";
+      data.months.forEach(month => {
+        const income = data.incomeByMonth[month] || 0;
+        const spend = data.spendByMonth[month] || 0;
+        const net = income - spend;
+        const tr = document.createElement("tr");
+        tr.innerHTML = `<td>${month}</td><td class="num">${formatR(income)}</td><td class="num">${formatR(spend)}</td><td class="num">${formatR(net)}</td>`;
+        tbody.appendChild(tr);
+      });
+    }
+
+    function handleFile(file) {
+      const errorBox = document.getElementById("errorBox");
+      errorBox.style.display = "none";
+
+      if (!file.name.toLowerCase().endsWith(".csv")) {
+        errorBox.textContent = "Please upload a .csv file.";
+        errorBox.style.display = "block";
+        return;
+      }
+
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        try {
+          const rows = parseCSV(e.target.result);
+          if (!rows.length || !("amount" in rows[0])) {
+            throw new Error("CSV must include date, description, amount columns.");
+          }
+          const data = processTransactions(rows);
+          const insightsResult = generateInsights(data);
+          render(data, insightsResult);
+        } catch (err) {
+          errorBox.textContent = "Couldn't read that file: " + err.message;
+          errorBox.style.display = "block";
+        }
+      };
+      reader.readAsText(file);
+    }
+
+    // ---- Wire up events ----
+    const dropzone = document.getElementById("dropzone");
+    const fileInput = document.getElementById("fileInput");
+
+    dropzone.addEventListener("click", () => fileInput.click());
+    fileInput.addEventListener("change", (e) => {
+      if (e.target.files.length) handleFile(e.target.files[0]);
+    });
+
+    ["dragenter", "dragover"].forEach(evt =>
+      dropzone.addEventListener(evt, (e) => { e.preventDefault(); dropzone.classList.add("dragover"); })
+    );
+    ["dragleave", "drop"].forEach(evt =>
+      dropzone.addEventListener(evt, (e) => { e.preventDefault(); dropzone.classList.remove("dragover"); })
+    );
+    dropzone.addEventListener("drop", (e) => {
+      if (e.dataTransfer.files.length) handleFile(e.dataTransfer.files[0]);
+    });
+
+    document.getElementById("resetBtn").addEventListener("click", () => {
+      document.getElementById("resultsScreen").style.display = "none";
+      document.getElementById("uploadScreen").style.display = "block";
+      fileInput.value = "";
+    });
+
+    // ---- Sample dataset generator (mirrors scripts/generate_mock_data.py) ----
+    document.getElementById("sampleBtn").addEventListener("click", () => {
+      const csv = generateSampleCSV();
+      const blob = new Blob([csv], { type: "text/csv" });
+      handleFile(new File([blob], "sample.csv"));
+    });
+
+    function generateSampleCSV() {
+      const merchants = {
+        "Groceries": ["Checkers Sandton", "Pick n Pay", "Woolworths Food", "Shoprite"],
+        "Eating Out": ["Mugg & Bean", "KFC Drive Thru", "Steers", "Nando's", "Uber Eats"],
+        "Transport": ["Uber Trip", "Shell Garage Fuel", "Engen Fuel", "Gautrain Top-up"],
+        "Airtime & Data": ["Vodacom Prepaid", "MTN Airtime", "Telkom Data Bundle"],
+        "Subscriptions": ["Netflix", "DSTV Now", "Spotify Premium", "Showmax"],
+        "Rent/Housing": ["Rent Payment - Landlord"],
+        "Utilities": ["City Power Prepaid", "Joburg Water", "Eskom Prepaid"],
+        "Insurance": ["Discovery Health Premium", "OUTsurance Car Cover"],
+        "Entertainment": ["Ster-Kinekor", "Sun International", "Spur Family"],
+        "Shopping": ["Mr Price", "Edgars", "Takealot.com", "Game Stores"],
+        "Bank Fees": ["Monthly Account Fee", "ATM Withdrawal Fee"],
+        "Savings Transfer": ["EFT to Savings Account"],
+      };
+      const ranges = {
+        "Groceries": [150, 1200], "Eating Out": [60, 450], "Transport": [100, 800],
+        "Airtime & Data": [50, 300], "Subscriptions": [99, 199], "Rent/Housing": [4500, 4500],
+        "Utilities": [300, 900], "Insurance": [450, 1100], "Entertainment": [100, 600],
+        "Shopping": [150, 2000], "Bank Fees": [8, 95], "Savings Transfer": [500, 1500],
+      };
+      const freq = {
+        "Groceries": 8, "Eating Out": 10, "Transport": 12, "Airtime & Data": 2,
+        "Subscriptions": 3, "Rent/Housing": 1, "Utilities": 3, "Insurance": 2,
+        "Entertainment": 3, "Shopping": 4, "Bank Fees": 3, "Savings Transfer": 1,
+      };
+
+      const rows = [];
+      const today = new Date();
+      for (let m = 2; m >= 0; m--) {
+        const d = new Date(today.getFullYear(), today.getMonth() - m, 1);
+        const yr = d.getFullYear(), mo = d.getMonth() + 1;
+        rows.push([`${yr}-${String(mo).padStart(2,"0")}-25`, "Salary - Employer Inc", 18500.00]);
+        Object.entries(freq).forEach(([cat, count]) => {
+          const [lo, hi] = ranges[cat];
+          for (let i = 0; i < count; i++) {
+            const merchant = merchants[cat][Math.floor(Math.random() * merchants[cat].length)];
+            const amount = -(Math.random() * (hi - lo) + lo);
+            const day = String(Math.floor(Math.random() * 27) + 1).padStart(2, "0");
+            rows.push([`${yr}-${String(mo).padStart(2,"0")}-${day}`, merchant, amount.toFixed(2)]);
+          }
+        });
+      }
+      rows.sort((a, b) => a[0].localeCompare(b[0]));
+      let balance = 6500;
+      const lines = ["date,description,amount,balance"];
+      rows.forEach(([date, desc, amount]) => {
+        balance += parseFloat(amount);
+        lines.push(`${date},${desc},${amount},${balance.toFixed(2)}`);
+      });
+      return lines.join("\n");
+    }
+</script>
+</body>
+</html>
