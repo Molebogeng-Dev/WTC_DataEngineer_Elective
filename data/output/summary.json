@@ -1,0 +1,104 @@
+{
+  "months_covered": [
+    "2026-05",
+    "2026-06",
+    "2026-07"
+  ],
+  "monthly_breakdown": {
+    "2026-05": {
+      "Transport": 6189.59,
+      "Groceries": 4560.23,
+      "Rent/Housing": 4500.0,
+      "Shopping": 4368.88,
+      "Eating Out": 2134.0,
+      "Utilities": 1808.76,
+      "Insurance": 1675.0,
+      "Savings Transfer": 1262.51,
+      "Entertainment": 1208.24,
+      "Subscriptions": 460.49,
+      "Airtime & Data": 277.58,
+      "Bank Fees": 147.11
+    },
+    "2026-06": {
+      "Shopping": 4922.76,
+      "Groceries": 4740.29,
+      "Rent/Housing": 4500.0,
+      "Transport": 4010.58,
+      "Eating Out": 2157.3,
+      "Utilities": 2106.31,
+      "Insurance": 1765.9,
+      "Entertainment": 838.37,
+      "Savings Transfer": 509.32,
+      "Airtime & Data": 383.83,
+      "Subscriptions": 361.35,
+      "Bank Fees": 146.84
+    },
+    "2026-07": {
+      "Transport": 7511.48,
+      "Groceries": 5104.41,
+      "Rent/Housing": 4500.0,
+      "Shopping": 2460.79,
+      "Eating Out": 2453.99,
+      "Utilities": 2104.1,
+      "Insurance": 1626.57,
+      "Savings Transfer": 1166.89,
+      "Entertainment": 710.17,
+      "Airtime & Data": 499.53,
+      "Subscriptions": 441.43,
+      "Bank Fees": 240.12
+    }
+  },
+  "average_monthly_by_category": {
+    "Transport": 5903.88,
+    "Groceries": 4801.64,
+    "Rent/Housing": 4500.0,
+    "Shopping": 3917.48,
+    "Eating Out": 2248.43,
+    "Utilities": 2006.39,
+    "Insurance": 1689.16,
+    "Savings Transfer": 979.57,
+    "Entertainment": 918.93,
+    "Subscriptions": 421.09,
+    "Airtime & Data": 386.98,
+    "Bank Fees": 178.02
+  },
+  "average_monthly_income": 18500.0,
+  "insights": [
+    {
+      "type": "summary",
+      "category": null,
+      "text": "Based on your last 3 months of spending, you could realistically free up around R975.70 per month by acting on the tips below.",
+      "potential_saving": 975.7
+    },
+    {
+      "type": "summary",
+      "category": "Transport",
+      "text": "You spend an average of R5,903.88 per month on Transport, which is 21.1% of your total monthly spending.",
+      "potential_saving": null
+    },
+    {
+      "type": "summary",
+      "category": "Groceries",
+      "text": "You spend an average of R4,801.64 per month on Groceries, which is 17.2% of your total monthly spending.",
+      "potential_saving": null
+    },
+    {
+      "type": "summary",
+      "category": "Rent/Housing",
+      "text": "You spend an average of R4,500.00 per month on Rent/Housing, which is 16.1% of your total monthly spending.",
+      "potential_saving": null
+    },
+    {
+      "type": "saving_tip",
+      "category": "Subscriptions",
+      "text": "You're spending about R421.09/month on subscriptions. Review which ones you actually use \u2014 cancelling even one unused subscription is the easiest saving available to you.",
+      "potential_saving": 105.27
+    },
+    {
+      "type": "warning",
+      "category": "Savings Transfer",
+      "text": "You're currently saving about 5.3% of your income. A common guideline is to save at least 10%. Increasing your monthly transfer to savings by R870.43 would get you there.",
+      "potential_saving": 870.43
+    }
+  ]
+}
